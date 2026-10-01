@@ -18,10 +18,12 @@ building both, for anyone writing a recompiler.
 
 ## Status
 
-* Boots through the intro movie, title screen and Arcade Mode menus and plays races at full
-  speed with music and sound effects. Tested so far: the intro, Arcade Mode menus and a single
-  race at High Speed Ring. Simulation Mode (`GTMENU.EXE`), the ending (`GTEND.EXE`), replays,
-  two-player battle and memory card saves (`memcard1.mcd`) have not been tested yet.
+* Boots through the intro movie, title screen and menus and plays races at full speed with
+  music and sound effects. Tested so far: the intro, an Arcade Mode single race at High Speed
+  Ring, and in Simulation Mode the GT World map, My Home, the License center and the B-1
+  license test (including its result screen and retry). Buying cars, championships, the ending
+  (`GTEND.EXE`), replays, two-player battle and memory card saves (`memcard1.mcd`) have not
+  been tested yet.
 * FMV playback (MDEC) is implemented.
 * 4x internal resolution with sub-pixel vertices (no wobble) by default, optional 16:9
   widescreen, keyboard and controller support (see below).

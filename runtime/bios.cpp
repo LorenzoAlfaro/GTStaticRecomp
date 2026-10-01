@@ -352,6 +352,61 @@ static void call_a0(CPU* c, uint32_t fn) {
         break;
     }
     case 0x1B: { uint32_t n = 0; while (MEM_LB(a0 + n)) n++; v0 = n; break; }  // strlen
+    case 0x0E: case 0x0F: v0 = (int32_t)a0 < 0 ? (uint32_t)-(int32_t)a0 : a0; break;  // abs / labs
+    case 0x10: case 0x11: v0 = (uint32_t)atoi(read_cstr(a0).c_str()); break;  // atoi / atol
+    case 0x16: {  // strncat
+        uint32_t d = a0;
+        while (MEM_LB(d)) d++;
+        uint32_t i = 0;
+        for (; i < a2; i++) { uint8_t ch = MEM_LB(a1 + i); if (!ch) break; MEM_SB(d + i, ch); }
+        MEM_SB(d + i, 0);
+        v0 = a0;
+        break;
+    }
+    case 0x1C: case 0x1E: case 0x1D: case 0x1F: {  // index/strchr, rindex/strrchr
+        bool last = fn == 0x1D || fn == 0x1F;
+        v0 = 0;
+        for (uint32_t i = 0;; i++) {
+            uint8_t ch = MEM_LB(a0 + i);
+            if (ch == (a1 & 0xFF)) { v0 = a0 + i; if (!last) break; }
+            if (!ch) break;
+        }
+        break;
+    }
+    case 0x20: case 0x21: case 0x22: {  // strpbrk / strspn / strcspn
+        std::string s = read_cstr(a0, 65536), set = read_cstr(a1);
+        size_t n = fn == 0x21 ? s.find_first_not_of(set) : s.find_first_of(set);
+        if (n == std::string::npos) n = s.size();
+        v0 = fn == 0x20 ? (n < s.size() ? a0 + (uint32_t)n : 0) : (uint32_t)n;
+        break;
+    }
+    case 0x24: {  // strstr
+        std::string s = read_cstr(a0, 65536), t = read_cstr(a1, 65536);
+        size_t n = s.find(t);
+        v0 = n == std::string::npos ? 0 : a0 + (uint32_t)n;
+        break;
+    }
+    case 0x25: v0 = (uint32_t)toupper((int)(a0 & 0xFF)); break;
+    case 0x26: v0 = (uint32_t)tolower((int)(a0 & 0xFF)); break;
+    case 0x27: {  // bcopy(src, dst, n)
+        std::vector<uint8_t> tmp(a2);
+        for (uint32_t i = 0; i < a2; i++) tmp[i] = (uint8_t)MEM_LB(a0 + i);
+        for (uint32_t i = 0; i < a2; i++) MEM_SB(a1 + i, tmp[i]);
+        break;
+    }
+    case 0x29: case 0x2D: {  // bcmp / memcmp
+        int r = 0;
+        for (uint32_t i = 0; i < a2 && !r; i++) r = (int)MEM_LB(a0 + i) - (int)MEM_LB(a1 + i);
+        v0 = (uint32_t)r;
+        break;
+    }
+    case 0x2C: {  // memmove
+        std::vector<uint8_t> tmp(a2);
+        for (uint32_t i = 0; i < a2; i++) tmp[i] = (uint8_t)MEM_LB(a1 + i);
+        for (uint32_t i = 0; i < a2; i++) MEM_SB(a0 + i, tmp[i]);
+        v0 = a0;
+        break;
+    }
     case 0x28: for (uint32_t i = 0; i < a1; i++) MEM_SB(a0 + i, 0); v0 = a0; break;  // bzero
     case 0x2A: for (uint32_t i = 0; i < a2; i++) MEM_SB(a0 + i, MEM_LB(a1 + i)); v0 = a0; break;  // memcpy
     case 0x2B: for (uint32_t i = 0; i < a2; i++) MEM_SB(a0 + i, a1); v0 = a0; break;  // memset

@@ -277,6 +277,7 @@ tooling) carried over unchanged. No decomp or symbol map was used.
 | 5 | Weak seeds turned internal `j` into tail calls | Recompiler | 1 | Solved |
 | 6 | `setjmp` placed in a helper that returns | Runtime | 1 | Caught before running |
 | 7 | Heredoc escaping (again) | Tooling | 1 | Workaround known |
+| 8 | BIOS string functions CTR never called | HLE BIOS | 1 | Solved |
 
 ### Details
 
@@ -345,6 +346,16 @@ tooling) carried over unchanged. No decomp or symbol map was used.
 - Python edits through a bash heredoc turned `\n` inside C strings into real newlines again
   (see CTR #15). Use the file-editing tool for C code with escapes.
 
+#### 8. Missing BIOS string functions (rating 1)
+- **Symptom:** Simulation Mode's GT World map drew only the cursors; the log showed
+  "unimplemented A0:24" and "A0:26".
+- **Root cause:** GTMENU looks up menu images by name with BIOS `strstr`/`tolower`, which the
+  HLE BIOS (written for CTR) didn't have, so the lookups failed silently.
+- **Fix:** implemented the rest of the A0 string/memory group (`strchr`, `strrchr`, `strstr`,
+  `strspn`, `toupper`/`tolower`, `memcmp`, `memmove`, `bcopy`, `atoi`, ...).
+- **Lesson:** grep the log for "unimplemented" after every new area of a game; an HLE BIOS
+  inherited from another game covers only what that game used.
+
 ### Enhancements
 - **Widescreen without game hooks:** scaling projected X by 3/4 in RTPS/RTPT works for any
   game that projects with the GTE. It needed no reverse engineering. The cost: the game still
@@ -353,7 +364,8 @@ tooling) carried over unchanged. No decomp or symbol map was used.
   longer take keyboard focus.
 
 ### Open issues
-- Simulation Mode (`GTMENU.EXE`), `GTEND.EXE`, replays, two-player and memory cards are
+- In Simulation Mode only the map, My Home, the License center and license test B-1 have been
+  tried; buying cars, championships, `GTEND.EXE`, replays, two-player and memory cards are
   untested.
 - Only the digital pad is emulated (analog sticks are mapped to the D-pad).
 - 2D HUD in widescreen; edge culling in widescreen.
