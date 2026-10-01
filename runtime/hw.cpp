@@ -4,6 +4,7 @@
 #include <cstring>
 #include <vector>
 
+#include "state.h"
 #include "psx.h"
 
 void crash_dump_state();
@@ -159,6 +160,9 @@ static void ev_vblank(int64_t t) {
     frames++;
     frame_debug_hooks();
     spu_run_until(t);
+    // save/load requests are handled here and only here: a fixed point where the native
+    // stack holds no heap pointers (state.cpp); the frontend runs after it with fresh locals
+    state_point();
     frontend_vblank();
     schedule(EV_VBLANK_END, line_cycle(frame_start_cycle, LINES_PER_FRAME));
 }
@@ -550,6 +554,28 @@ void hw_init() {
     for (auto& t : timers) t.mode = 0x400;
     frame_start_cycle = 0;
     schedule(EV_VBLANK, line_cycle(0, VBLANK_START_LINE));
+}
+
+// ---------------------------------------------------------------------------------
+// save states
+
+void hw_state(StateIO& s) {
+    s.section(0x48570001);
+    s.bytes(g_ram, sizeof g_ram);
+    s.bytes(g_scratch, sizeof g_scratch);
+    s.bytes(ev_time, sizeof ev_time);
+    s.io(frame_start_cycle);
+    s.io(frames);
+    s.io(in_vblank);
+    s.io(i_stat);
+    s.io(i_mask);
+    for (auto& t : timers) s.io(t);
+    for (auto& d : dma) s.io(d);
+    s.io(dpcr);
+    s.io(dicr);
+    s.io(mdec_out_pending);
+    s.io(expansion_post);
+    if (s.loading) g_dma_generation++;  // code in RAM changed: recheck residency
 }
 
 }  // namespace psx

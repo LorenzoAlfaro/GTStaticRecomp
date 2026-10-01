@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "psx.h"
+#include "state.h"
 
 namespace psx {
 
@@ -756,7 +757,10 @@ static void bios_exec(CPU* c, uint32_t hdr, uint32_t argc, uint32_t argv) {
     cpu_exec_unwind();
 }
 
-void bios_boot(CPU* c) {
+// Disc checks and loading the boot executable. Separate from bios_boot so its heap buffers
+// are gone before the game runs: bios_boot's frame stays on the emulation stack for the
+// whole game, and save states restore that stack in later sessions.
+static uint32_t boot_load(uint32_t* gp_out) {
     // every executable must match the one that was recompiled
     for (int k = 0; k < g_overlay_count; k++) {
         const OverlayInfo& o = g_overlays[k];
@@ -771,13 +775,19 @@ void bios_boot(CPU* c) {
 
     // like the real BIOS: load the boot executable named in SYSTEM.CNF (SCUS_941.94, still packed)
     std::vector<uint8_t> exe = read_disc_file("SCUS_941.94");
-    uint32_t pc, gp, taddr, tsize;
+    uint32_t pc, taddr, tsize;
     memcpy(&pc, &exe[0x10], 4);
-    memcpy(&gp, &exe[0x14], 4);
+    memcpy(gp_out, &exe[0x14], 4);
     memcpy(&taddr, &exe[0x18], 4);
     memcpy(&tsize, &exe[0x1C], 4);
     memcpy(g_ram + (taddr & 0x1FFFFF), exe.data() + 0x800, tsize);
     LOGI("booting SCUS_941.94: entry %08x, %u bytes", pc, tsize);
+    return pc;
+}
+
+void bios_boot(CPU* c) {
+    uint32_t gp;
+    uint32_t pc = boot_load(&gp);
 
     // Fake kernel tables for PsyQ's memory card "patches" (_patch_card/_patch_card2): they
     // follow BIOS table pointers and copy fix-up code into kernel RAM. Point them at unused
@@ -797,6 +807,23 @@ void bios_boot(CPU* c) {
     rt_setjmp(cpu_exec_jb());
     rt_call(&g_cpu, g_boot_pc, 0xFFFFFFF0);
     LOGI("program returned to the BIOS");
+}
+
+void bios_state(StateIO& s) {
+    s.section(0x42494F01);
+    s.io(events);
+    for (auto& f : files) s.io(f);
+    s.io(dir_iter.port);
+    s.io(dir_iter.next_block);
+    uint64_t n = dir_iter.pattern.size();
+    s.io(n);
+    if (s.loading) dir_iter.pattern.resize(n);
+    if (n) s.bytes(&dir_iter.pattern[0], n);
+    s.io(int_chain);
+    s.io(custom_exit);
+    s.io(clear_rcnt);
+    s.io(rand_next);
+    s.io(g_boot_pc);
 }
 
 }  // namespace psx

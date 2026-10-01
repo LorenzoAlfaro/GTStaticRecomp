@@ -9,3 +9,4 @@ run_err.txt
 run_out.txt
 __pycache__/
 gt.cfg
+states/

@@ -37,10 +37,11 @@ endif()
 # ---- runtime ----------------------------------------------------------------
 add_executable(gt
   runtime/main.cpp runtime/cpu.cpp runtime/hw.cpp runtime/bios.cpp runtime/gte.cpp
-  runtime/gpu.cpp runtime/spu.cpp runtime/cdrom.cpp runtime/sio.cpp runtime/mdec.cpp runtime/crash.cpp runtime/hooks.cpp runtime/pgxp.cpp runtime/jmp.c)
+  runtime/gpu.cpp runtime/spu.cpp runtime/cdrom.cpp runtime/sio.cpp runtime/mdec.cpp runtime/crash.cpp runtime/hooks.cpp runtime/pgxp.cpp runtime/state.cpp runtime/jmp.c)
 target_include_directories(gt PRIVATE runtime)
 target_compile_options(gt PRIVATE -O2 -g -fwrapv -fno-strict-aliasing -Wall -Wno-unused-variable -Wno-unused-function)
 target_link_libraries(gt PRIVATE gt_gen SDL2::SDL2-static SDL2::SDL2main)
 if(MINGW)
-  target_link_options(gt PRIVATE -static -mwindows)
+  # no ASLR: save states contain the native stack, whose return addresses must stay valid
+  target_link_options(gt PRIVATE -static -mwindows -Wl,--disable-dynamicbase)
 endif()

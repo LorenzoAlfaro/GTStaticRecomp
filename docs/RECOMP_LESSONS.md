@@ -278,6 +278,7 @@ tooling) carried over unchanged. No decomp or symbol map was used.
 | 6 | `setjmp` placed in a helper that returns | Runtime | 1 | Caught before running |
 | 7 | Heredoc escaping (again) | Tooling | 1 | Workaround known |
 | 8 | BIOS string functions CTR never called | HLE BIOS | 1 | Solved |
+| 9 | Save states need the native call stack | Runtime design | 3 | Solved (fixed stack + one save point) |
 
 ### Details
 
@@ -355,6 +356,28 @@ tooling) carried over unchanged. No decomp or symbol map was used.
   `strspn`, `toupper`/`tolower`, `memcmp`, `memmove`, `bcopy`, `atoi`, ...).
 - **Lesson:** grep the log for "unimplemented" after every new area of a game; an HLE BIOS
   inherited from another game covers only what that game used.
+
+#### 9. Save states (rating 3)
+- **Problem:** in a static recomp the game's position is partly the host call stack (nested
+  native functions), which an emulator-style state can't express.
+- **Fix:**
+  - run the game on a stack at a fixed virtual address (`VirtualAlloc` at 0x700000000,
+    `rt_run_on_stack`, TEB stack bounds updated) and link `gt.exe` with
+    `--disable-dynamicbase`, so return addresses and stack addresses mean the same in every
+    session;
+  - save/load only at the start of the vblank event, where the stack holds no heap
+    pointers; the frontend runs after that point with fresh locals;
+  - a state = device data + the stack bytes above an `rt_setjmp` taken there; loading copies
+    them back from a scratch stack and `rt_longjmp`s in;
+  - `bios_boot` had `std::vector`s alive for the whole game; they moved into a helper so no
+    heap pointer sits on the saved stack.
+- **How it was verified:** run A saves and keeps going; run B loads it. Per-frame RAM hashes
+  and screenshots must match exactly. The first try matched in RAM but not in pixels: the
+  PGXP vertex table (cleared on load) still influences drawing across frames, so it is now
+  part of the state.
+- **Lesson:** design save states around one save point with a known-clean stack, and test
+  them with an A/B comparison, not by eye. Anything "just a cache" that affects output
+  must be saved too.
 
 ### Enhancements
 - **Widescreen without game hooks:** scaling projected X by 3/4 in RTPS/RTPT works for any

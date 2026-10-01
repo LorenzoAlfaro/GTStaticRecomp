@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "state.h"
 #include "psx.h"
 
 namespace psx {
@@ -475,6 +476,48 @@ void cd_init() {
     int_flag = 0;
     int_enable = 0x1F;  // set by the BIOS during boot
     stat = 0x02;
+}
+
+void cd_state(StateIO& s) {
+    s.section(0x43440001);
+    s.io(index_reg);
+    s.deq(params);
+    s.io(int_enable);
+    s.io(int_flag);
+    s.vec(resp);
+    s.io(resp_pos);
+    s.io(stat);
+    s.io(mode);
+    s.io(setloc_lba);
+    s.io(cur_lba);
+    s.io(setloc_pending);
+    s.io(reading);
+    s.io(read_audio_only);
+    s.io(muted);
+    s.io(filter_file);
+    s.io(filter_chan);
+    s.io(vol_ll);
+    s.io(vol_lr);
+    s.io(vol_rl);
+    s.io(vol_rr);
+    s.io(pend_vol);
+    s.io(busy);
+    s.io(sector_raw);
+    s.io(last_header);
+    s.vec(data_fifo);
+    s.io(data_pos);
+    uint64_t n = queue.size();
+    s.io(n);
+    if (s.loading) queue.resize(n);
+    for (auto& p : queue) {
+        s.io(p.type);
+        s.vec(p.bytes);
+        s.io(p.delay);
+        s.io(p.has_sector);
+        s.io(p.sector);
+    }
+    s.io(xa_old);
+    s.io(xa_older);
 }
 
 }  // namespace psx

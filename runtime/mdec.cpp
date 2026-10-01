@@ -7,6 +7,7 @@
 #include <deque>
 #include <vector>
 
+#include "state.h"
 #include "psx.h"
 
 namespace psx {
@@ -225,6 +226,19 @@ void mdec_init() {
     remaining = 0;
     params.clear();
     out.clear();
+}
+
+void mdec_state(StateIO& s) {
+    s.section(0x4D444301);
+    s.io(qt_y);
+    s.io(qt_uv);
+    s.io(scale);
+    s.io(cmd);
+    s.io(remaining);
+    s.vec(params);
+    s.deq(out);
+    s.io(en_in);
+    s.io(en_out);
 }
 
 }  // namespace psx

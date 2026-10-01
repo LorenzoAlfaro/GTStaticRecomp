@@ -3,6 +3,7 @@
 #include <cstring>
 #include <vector>
 
+#include "state.h"
 #include "psx.h"
 
 namespace psx {
@@ -452,6 +453,31 @@ void spu_init() {
     memset(regs, 0, sizeof regs);
     register_event(EV_SPU, ev_spu);
     schedule(EV_SPU, 768 * 32);
+}
+
+void spu_state(StateIO& s) {
+    s.section(0x53505501);
+    s.bytes(spu_ram, sizeof spu_ram);
+    s.bytes(regs, sizeof regs);
+    for (auto& v : voices) s.io(v);
+    s.io(endx);
+    s.io(transfer_addr);
+    s.io(irq_addr);
+    s.io(irq_flag);
+    s.io(capture_pos);
+    s.io(last_cycles);
+    s.io(cycle_accum);
+    s.io(noise_level);
+    s.io(noise_timer);
+    s.io(reverb_addr);
+    s.io(reverb_odd);
+    s.io(reverb_out_l);
+    s.io(reverb_out_r);
+    s.vec(cd_buf);
+    s.io(cd_rd);
+    s.io(cd_wr);
+    s.io(cd_frac);
+    s.vec(out_buf);
 }
 
 }  // namespace psx

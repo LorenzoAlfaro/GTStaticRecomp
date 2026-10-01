@@ -68,7 +68,20 @@ __asm__(
     "    movdqu 224(%rcx), %xmm14\n"
     "    movdqu 240(%rcx), %xmm15\n"
     "    movq 64(%rcx), %rsp\n"
-    "    jmpq *72(%rcx)\n");
+    "    jmpq *72(%rcx)\n"
+    // rt_run_on_stack(top, fn): call fn() with rsp = top (16-byte aligned), then return on
+    // the original stack. Used to run the game on a fixed-address stack (save states).
+    ".globl rt_run_on_stack\n"
+    ".def rt_run_on_stack; .scl 2; .type 32; .endef\n"
+    "rt_run_on_stack:\n"
+    "    pushq %rbp\n"
+    "    movq %rsp, %rbp\n"
+    "    movq %rcx, %rsp\n"
+    "    subq $32, %rsp\n"
+    "    callq *%rdx\n"
+    "    movq %rbp, %rsp\n"
+    "    popq %rbp\n"
+    "    ret\n");
 #else
 #error "rt_setjmp/rt_longjmp are implemented for Windows x86-64 only"
 #endif

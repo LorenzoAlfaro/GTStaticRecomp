@@ -1,5 +1,8 @@
 // Sub-pixel vertex table, see pgxp.h.
+#include <cstring>
+
 #include "pgxp.h"
+#include "state.h"
 
 namespace psx {
 
@@ -36,6 +39,12 @@ bool pgxp_lookup(uint32_t sxy, float* x, float* y, float* z) {
     *y = e.y;
     if (z) *z = e.z;
     return true;
+}
+
+// part of save states: entries from earlier frames still decide how some vertices are drawn
+void pgxp_state(StateIO& s) {
+    s.section(0x50475801);
+    s.bytes(table, sizeof table);
 }
 
 }  // namespace psx

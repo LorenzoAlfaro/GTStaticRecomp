@@ -23,6 +23,7 @@ typedef void (*RecompFunc)(CPU* c);
 typedef uint64_t rt_jmp_buf[32];
 int rt_setjmp(uint64_t* buf) __attribute__((returns_twice));
 __attribute__((noreturn)) void rt_longjmp(uint64_t* buf, int val);
+void rt_run_on_stack(void* top, void (*fn)(void));
 
 typedef struct FuncEntry {
     uint32_t addr;

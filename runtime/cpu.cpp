@@ -6,6 +6,7 @@
 
 #include "cycles.h"
 #include "psx.h"
+#include "state.h"
 
 void crash_dump_state();
 
@@ -728,3 +729,26 @@ void rt_rfe(CPU* c) {
 }
 
 }  // extern "C"
+
+// ---------------------------------------------------------------------------------
+// save states: the CPU and the dispatcher's control-flow stacks. The jump buffers point
+// into the fixed emulation stack (state.cpp), which is saved alongside.
+
+namespace psx {
+void cpu_state(StateIO& s) {
+    s.section(0x43505501);
+    s.io(g_cpu);
+    s.io(g_retsp);
+    if (g_retsp < 0 || g_retsp > 4096) { s.ok = false; return; }
+    s.bytes(g_retframes, sizeof(RetFrame) * (size_t)g_retsp);
+    s.io(g_lj_target);
+    s.io(g_in_exception);
+    s.io(g_exc_jb);
+    s.io(g_exc_saved);
+    s.io(g_exc_retsp);
+    s.io(g_exc_unwind);
+    s.io(g_unwind_depth);
+    s.io(g_exec_jb);
+    s.io(g_exec_jb_set);
+}
+}  // namespace psx

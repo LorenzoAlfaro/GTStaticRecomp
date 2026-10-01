@@ -20,6 +20,7 @@
 
 #include "pgxp.h"
 #include "psx.h"
+#include "state.h"
 
 namespace psx {
 
@@ -1052,6 +1053,66 @@ void gpu_init() {
     gpu_sync();
     std::fill(vram.begin(), vram.end(), 0);
     gpu_write_gp1(0);
+}
+
+void gpu_state(StateIO& s) {
+    s.section(0x47505501);
+    gpu_sync();
+    s.io(stat_texpage);
+    s.io(tex_disable);
+    s.io(allow_tex_disable);
+    s.io(dither);
+    s.io(draw_to_display);
+    s.io(mask_set);
+    s.io(mask_check);
+    s.io(tw_mask_x);
+    s.io(tw_mask_y);
+    s.io(tw_off_x);
+    s.io(tw_off_y);
+    s.io(da_x1);
+    s.io(da_y1);
+    s.io(da_x2);
+    s.io(da_y2);
+    s.io(off_x);
+    s.io(off_y);
+    s.io(display_disabled);
+    s.io(dma_dir);
+    s.io(disp_x);
+    s.io(disp_y);
+    s.io(h_start);
+    s.io(h_end);
+    s.io(v_start);
+    s.io(v_end);
+    s.io(disp_mode);
+    s.io(irq_flag);
+    s.io(vblank_now);
+    s.io(cmd);
+    s.io(cmd_len);
+    s.io(cmd_need);
+    s.io(polyline);
+    s.io(pl);
+    s.io(upload);
+    s.io(download);
+    // VRAM at the internal resolution it was saved with; converted if that differs now
+    int saved_sh = sh;
+    s.io(saved_sh);
+    if (!s.loading) {
+        s.vec(vram);
+        return;
+    }
+    std::vector<uint16_t> img;
+    s.vec(img);
+    if (!s.ok) return;
+    if (saved_sh == sh && img.size() == vram.size()) {
+        vram.swap(img);
+        return;
+    }
+    int ssh = saved_sh;
+    for (int y = 0; y < 512; y++)
+        for (int x = 0; x < 1024; x++) {
+            size_t si = ((size_t)(y << ssh) << (10 + ssh)) | (size_t)(x << ssh);
+            px_fill(x, y, si < img.size() ? img[si] : 0);
+        }
 }
 
 }  // namespace psx

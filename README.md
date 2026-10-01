@@ -93,7 +93,9 @@ with the disc it was built from.
 Keyboard: arrows = D-pad, C = Cross, V = Circle, X = Square, Z = Triangle, Enter = Start,
 Space = Select, LShift/RShift = L1/R1, LCtrl/RCtrl = L2/R2. F11 or Alt+Enter = fullscreen,
 Tab = fast forward, Pause = pause, F9 = 16:9 widescreen, F10 = internal resolution
-(1x/2x/4x), F8 = PGXP sub-pixel vertices, F7 = dithering. Settings are saved in `gt.cfg`.
+(1x/2x/4x), F8 = PGXP sub-pixel vertices, F7 = dithering. F5 = save state, F6 = load state,
+F2/F3 = previous/next save state slot (1–9, shown in the window title). Settings are saved in
+`gt.cfg`.
 
 Game controllers with an SDL mapping (Xbox/XInput, DualShock 4/DualSense, most common pads)
 use the standard layout (A = Cross, B = Circle, X = Square, Y = Triangle). Joysticks without a
@@ -126,6 +128,28 @@ A race runs at full speed (16.7 ms per 60 Hz field) at 4x on a Ryzen 5 3600.
 `GT_PROFILE=1` logs a per-frame
 breakdown every 300 frames, `GT_GPU_THREADS=N` sets the number of render threads.
 
+## Save states
+
+F5 saves the whole machine to `states/slotN.gtss` and F6 loads it, in the same session or a
+later one. In-game saves to the memory card (`memcard1.mcd`) are separate and not affected.
+
+A static recomp needs one thing an emulator doesn't: the game's code runs as nested native
+functions, so part of its state is the host call stack. The game therefore runs on a stack
+at a fixed address (`runtime/state.cpp`) and `gt.exe` is linked without ASLR. Saving and
+loading happen only at one point, the start of the vblank event, where that stack holds
+nothing but return addresses, scalars and pointers into `gt.exe`. A state holds the bytes of
+that stack and a jump buffer taken there, plus every device's data (`*_state` functions in
+each runtime file; one function both saves and loads). Loading restores the devices, copies
+the stack back from a scratch stack and jumps into the buffer.
+
+* A state only loads into the exact `gt.exe` that made it (its hash is stored): rebuilding
+  makes old states unusable.
+* A state is about 20 MB at 4x, mostly the upscaled VRAM. States load at any internal
+  resolution (VRAM is converted).
+* Tested: a run that loads a state matches the original run pixel for pixel and with
+  identical RAM, both in a new session and when rewinding in the same session, including
+  loading a menu state during a race (a different executable resident).
+
 ## Widescreen
 
 `--widescreen` or F9 switches to 16:9. It is done in the GTE rather than in game code: the
@@ -137,6 +161,8 @@ appear late.
 
 ## Debugging tools
 
+* `--save-state-at N slot`, `--load-state-at N slot`, `--load-state slot` (at boot): scripted
+  save state tests.
 * `--frames N`, `--shot N file.bmp`, `--shot-every N dir`, `--turbo`, `--keys` (scripted
   input, e.g. `"1600:start,2500:cross,4000:cross:600"`): headless test runs.
 * `--interp`: run everything on the interpreter (reference behaviour).

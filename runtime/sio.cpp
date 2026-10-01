@@ -2,6 +2,7 @@
 // so the card address (0x81) is left unanswered here.
 #include <algorithm>
 
+#include "state.h"
 #include "psx.h"
 
 namespace psx {
@@ -18,7 +19,7 @@ static int step[2] = {0, 0};
 static bool device_active[2] = {false, false};  // this transfer sequence addressed a pad
 static bool pending_ack = false;
 static uint8_t pending_rx = 0xFF;
-static enum { SIO_IDLE, SIO_XFER, SIO_ACK } sio_state = SIO_IDLE;
+static enum { SIO_IDLE, SIO_XFER, SIO_ACK } xfer_state = SIO_IDLE;
 
 static int port() { return (ctrl >> 13) & 1; }
 
@@ -56,22 +57,22 @@ static uint8_t pad_exchange(int p, uint8_t tx, bool* ack) {
 }
 
 static void ev_sio(int64_t t) {
-    if (sio_state == SIO_XFER) {
+    if (xfer_state == SIO_XFER) {
         tx_busy = false;
         rx = pending_rx;
         rx_full = true;
         if (pending_ack) {
-            sio_state = SIO_ACK;
+            xfer_state = SIO_ACK;
             ack_level = true;
             schedule(EV_SIO, t + 100);
         } else {
-            sio_state = SIO_IDLE;
+            xfer_state = SIO_IDLE;
         }
         return;
     }
-    if (sio_state == SIO_ACK) {
+    if (xfer_state == SIO_ACK) {
         ack_level = false;
-        sio_state = SIO_IDLE;
+        xfer_state = SIO_IDLE;
         if (ctrl & 0x1000) {  // DSR (ACK) interrupt enable
             irq_flag = true;
             irq_raise(IRQ_SIO0);
@@ -111,7 +112,7 @@ void sio_write(uint32_t off, uint32_t v, int) {
         pending_rx = pad_exchange(port(), (uint8_t)v, &ack);
         pending_ack = ack;
         tx_busy = true;
-        sio_state = SIO_XFER;
+        xfer_state = SIO_XFER;
         int64_t bit = (int64_t)baud * ((mode & 3) == 2 ? 16 : (mode & 3) == 3 ? 64 : 1);
         schedule(EV_SIO, now() + std::max<int64_t>(bit * 8, 256));
         break;
@@ -121,7 +122,7 @@ void sio_write(uint32_t off, uint32_t v, int) {
         if (v & 0x40) {  // reset
             ctrl = 0; mode = 0; rx_full = false; tx_busy = false; irq_flag = false;
             step[0] = step[1] = 0;
-            sio_state = SIO_IDLE;
+            xfer_state = SIO_IDLE;
             unschedule(EV_SIO);
             return;
         }
@@ -141,6 +142,23 @@ void sio_write(uint32_t off, uint32_t v, int) {
 void sio_init() {
     register_event(EV_SIO, ev_sio);
     g_pads[1].connected = false;
+}
+
+void sio_state(StateIO& s) {
+    s.section(0x53494F01);
+    s.io(ctrl);
+    s.io(mode);
+    s.io(baud);
+    s.io(rx);
+    s.io(rx_full);
+    s.io(tx_busy);
+    s.io(irq_flag);
+    s.io(ack_level);
+    s.io(step);
+    s.io(device_active);
+    s.io(pending_ack);
+    s.io(pending_rx);
+    s.io(xfer_state);
 }
 
 }  // namespace psx

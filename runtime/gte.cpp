@@ -5,6 +5,7 @@
 
 #include "pgxp.h"
 #include "recomp.h"
+#include "state.h"
 
 namespace {
 
@@ -471,4 +472,9 @@ void gte_command(CPU*, uint32_t cmd) {
 namespace psx {
 void set_widescreen(bool on) { g_widescreen = on; }
 bool widescreen() { return g_widescreen; }
+void gte_state(StateIO& s) {
+    s.section(0x47544501);
+    s.io(g);
+}
+
 }  // namespace psx

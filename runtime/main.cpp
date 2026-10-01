@@ -1,5 +1,6 @@
 // SDL2 frontend: window/video, audio, input, pacing, and startup.
 #include <SDL.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <chrono>
@@ -10,6 +11,7 @@
 
 #include "pgxp.h"
 #include "psx.h"
+#include "state.h"
 
 extern "C" FILE* g_trace_file;
 extern "C" long long g_break_cycles;
@@ -36,6 +38,11 @@ static double next_frame_time = 0;
 static bool fast_forward = false;
 static bool paused = false;
 static uint64_t exit_after_frames = 0;
+static int state_slot = 1;      // save state slot (F2/F3)
+static uint64_t save_at_frame = 0;  // --save-state-at N slot / --load-state slot (tests)
+static int save_at_slot = 0, load_at_start = 0;
+static uint64_t load_at_frame = 0;
+static int load_at_slot = 0;
 static int display_index = -1;  // monitor to open the window on (--display / display= in gt.cfg)
 
 // --keys "frame:button[+button]:duration,..." scripted input for automated tests
@@ -296,6 +303,10 @@ void frontend_poll_input() {
                 set_widescreen(!widescreen());
                 save_settings();
             }
+            if (e.key.keysym.scancode == SDL_SCANCODE_F5) state_request_save(state_slot);
+            if (e.key.keysym.scancode == SDL_SCANCODE_F6) state_request_load(state_slot);
+            if (e.key.keysym.scancode == SDL_SCANCODE_F2) state_slot = state_slot > 1 ? state_slot - 1 : 9;
+            if (e.key.keysym.scancode == SDL_SCANCODE_F3) state_slot = state_slot < 9 ? state_slot + 1 : 1;
             if (e.key.keysym.scancode == SDL_SCANCODE_TAB) fast_forward = true;
             if (e.key.keysym.scancode == SDL_SCANCODE_PAUSE) paused = !paused;
             break;
@@ -314,6 +325,8 @@ static bool profile = getenv("GT_PROFILE") != nullptr;
 
 void frontend_vblank() {
     frame_counter++;
+    if (save_at_frame && frame_counter == save_at_frame) state_request_save(save_at_slot);
+    if (load_at_frame && frame_counter == load_at_frame) state_request_load(load_at_slot);
     static double p_last = 0, p_sync = 0, p_conv = 0, p_present = 0;
     double t0 = now_seconds();
     gpu_sync();
@@ -401,15 +414,28 @@ void frontend_vblank() {
 
     static double fps_t = 0;
     static uint64_t fps_n = 0;
+    static double fps = 0;
+    static std::string last_title;
     if (fps_t == 0) fps_t = t;
     if (t - fps_t >= 1.0) {
-        char title[128];
-        snprintf(title, sizeof title, "Gran Turismo (static recomp) - %.1f fps%s - %dx%s", (frame_counter - fps_n) / (t - fps_t),
-                 widescreen() ? " - 16:9" : "", gpu_scale(), g_pgxp ? " PGXP" : "");
-        SDL_SetWindowTitle(window, title);
+        fps = (frame_counter - fps_n) / (t - fps_t);
         fps_t = t;
         fps_n = frame_counter;
     }
+    char title[256];
+    const char* msg = state_message();
+    snprintf(title, sizeof title, "Gran Turismo (static recomp) - %.1f fps%s - %dx%s - slot %d%s%s", fps,
+             widescreen() ? " - 16:9" : "", gpu_scale(), g_pgxp ? " PGXP" : "", state_slot, *msg ? " - " : "", msg);
+    if (last_title != title) {
+        SDL_SetWindowTitle(window, title);
+        last_title = title;
+    }
+}
+
+// a save state was just loaded: drop audio from before it and restart frame pacing
+void frontend_after_load() {
+    if (audio_dev) SDL_ClearQueuedAudio(audio_dev);
+    next_frame_time = 0;
 }
 
 void frontend_audio(const int16_t* stereo, int frames) {
@@ -482,6 +508,13 @@ int main(int argc, char** argv) {
             shot_dir = argv[++i];
         } else if (!strcmp(argv[i], "--turbo")) fast_forward = true;
         else if (!strcmp(argv[i], "--display") && i + 1 < argc) display_index = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--save-state-at") && i + 2 < argc) {
+            save_at_frame = strtoull(argv[++i], nullptr, 10);
+            save_at_slot = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--load-state-at") && i + 2 < argc) {
+            load_at_frame = strtoull(argv[++i], nullptr, 10);
+            load_at_slot = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--load-state") && i + 1 < argc) load_at_start = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--interp")) g_pure_interp = true;
         else if (!strcmp(argv[i], "--verify")) g_verify = true;
         else if (!strcmp(argv[i], "--check-sregs")) g_check_sregs = true;
@@ -549,7 +582,12 @@ int main(int argc, char** argv) {
     sio_init();
     mdec_init();
     bios_init();
-    bios_boot(&g_cpu);
+    char exe_path[MAX_PATH];
+    GetModuleFileNameA(nullptr, exe_path, sizeof exe_path);
+    state_init(exe_path);
+    if (load_at_start) state_request_load(load_at_start);  // handled at the first vblank
+    // the game runs on a fixed-address stack so save states can capture it (state.cpp)
+    state_run([] { bios_boot(&g_cpu); });
     bios_flush_cards();
     SDL_Quit();
     return 0;
