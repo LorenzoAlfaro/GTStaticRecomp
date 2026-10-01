@@ -1,0 +1,11 @@
+build/
+data/
+gt.exe
+gt_disc.txt
+*.mcd
+gt.log
+*.log
+run_err.txt
+run_out.txt
+__pycache__/
+gt.cfg
