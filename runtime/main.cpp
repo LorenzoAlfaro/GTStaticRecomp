@@ -38,6 +38,13 @@ static double next_frame_time = 0;
 static bool fast_forward = false;
 static bool paused = false;
 static uint64_t exit_after_frames = 0;
+// Internal resolution chosen by the user (F10, --scale, gt.cfg). 480-line (interlaced) modes,
+// such as Simulation Mode's menus, are rendered at half of it: the same output height as a
+// 240-line mode at the full scale, for a quarter of the rendering work.
+static int user_scale = 4;
+static int effective_scale(const DisplayInfo& d) {
+    return d.h > 256 ? std::max(1, user_scale / 2) : user_scale;
+}
 static int state_slot = 1;      // save state slot (F2/F3)
 static uint64_t save_at_frame = 0;  // --save-state-at N slot / --load-state slot (tests)
 static int save_at_slot = 0, load_at_start = 0;
@@ -139,7 +146,7 @@ static void load_settings() {
     while (fgets(line, sizeof line, f)) {
         int v;
         if (sscanf(line, "widescreen=%d", &v) == 1) set_widescreen(v != 0);
-        if (sscanf(line, "scale=%d", &v) == 1) gpu_set_scale(v);
+        if (sscanf(line, "scale=%d", &v) == 1) user_scale = v;
         if (sscanf(line, "pgxp=%d", &v) == 1) g_pgxp = v != 0;
         if (sscanf(line, "dither=%d", &v) == 1) gpu_set_dither(v != 0);
         if (sscanf(line, "display=%d", &v) == 1) display_index = v;
@@ -151,7 +158,7 @@ static void save_settings() {
     FILE* f = fopen("gt.cfg", "w");
     if (!f) return;
     fprintf(f, "widescreen=%d\n", widescreen() ? 1 : 0);
-    fprintf(f, "scale=%d\n", gpu_scale());
+    fprintf(f, "scale=%d\n", user_scale);
     fprintf(f, "pgxp=%d\n", g_pgxp ? 1 : 0);
     fprintf(f, "dither=%d\n", gpu_dither() ? 1 : 0);
     if (display_index >= 0) fprintf(f, "display=%d\n", display_index);
@@ -288,7 +295,7 @@ void frontend_poll_input() {
                 SDL_SetWindowFullscreen(window, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
             }
             if (e.key.keysym.scancode == SDL_SCANCODE_F10) {  // internal resolution 1x -> 2x -> 4x
-                gpu_set_scale(gpu_scale() >= 4 ? 1 : gpu_scale() * 2);
+                user_scale = user_scale >= 4 ? 1 : user_scale * 2;
                 save_settings();
             }
             if (e.key.keysym.scancode == SDL_SCANCODE_F8) {
@@ -322,9 +329,18 @@ void frontend_poll_input() {
 extern uint64_t g_gpu_stalls, g_gpu_stall_why[4], g_gpu_copies;
 extern double g_gpu_wait_s, g_gpu_full_s;
 static bool profile = getenv("GT_PROFILE") != nullptr;
+static double g_prof_max_frame = 0;          // longest frame (profiling)
+static uint32_t g_prof_min_queue = 1u << 30; // lowest queued audio, bytes (profiling)
+static int g_prof_underruns = 0;              // audio cushion refills (profiling)
 
 void frontend_vblank() {
     frame_counter++;
+    // follow display mode changes (a resample only happens when the scale actually changes)
+    int want = effective_scale(gpu_display());
+    if (want != gpu_scale()) {
+        LOGI("internal resolution %dx for a %d-line display", want, gpu_display().h);
+        gpu_set_scale(want);
+    }
     if (save_at_frame && frame_counter == save_at_frame) state_request_save(save_at_slot);
     if (load_at_frame && frame_counter == load_at_frame) state_request_load(load_at_slot);
     static double p_last = 0, p_sync = 0, p_conv = 0, p_present = 0;
@@ -367,7 +383,15 @@ void frontend_vblank() {
     if (profile) {
         double t3 = now_seconds();
         p_sync += t1 - t0; p_conv += t2 - t1; p_present += t3 - t2;
+        static double prev_t3 = 0;
+        if (prev_t3) g_prof_max_frame = std::max(g_prof_max_frame, t3 - prev_t3);
+        prev_t3 = t3;
         if (frame_counter % 300 == 0) {
+            LOGI("profile: worst frame %.1f ms, lowest audio queue %.1f ms, audio refills %d", g_prof_max_frame * 1000,
+                 g_prof_min_queue / 4.0 / 44.1, g_prof_underruns);
+            g_prof_underruns = 0;
+            g_prof_max_frame = 0;
+            g_prof_min_queue = 1u << 30;
             double total = t3 - p_last;
             LOGI("profile: %.2f ms/frame: emu %.2f, gpu wait %.2f, convert %.2f, present %.2f, stalls %.1f/frame (tex %llu upload %llu download %llu)",
                  total * 1000 / 300, (total - p_sync - p_conv - p_present) * 1000 / 300, p_sync * 1000 / 300,
@@ -450,7 +474,18 @@ void frontend_audio(const int16_t* stereo, int frames) {
         peak = 0;
     }
     uint32_t queued = SDL_GetQueuedAudioSize(audio_dev);
+    g_prof_min_queue = std::min(g_prof_min_queue, queued);
     if (queued > 44100 * 4 / 5) return;  // > 200 ms behind: drop
+    // Keep a cushion of queued audio so a slow frame doesn't run the device dry. Without one
+    // the queue level is whatever happened at startup, often ~0: every frame over 16.7 ms is
+    // then an audible gap. Below ~12 ms, pad back up to 50 ms with silence (one short gap).
+    const uint32_t low = 44100 * 4 * 12 / 1000, target = 44100 * 4 * 50 / 1000;
+    if (queued < low) {
+        static std::vector<int16_t> silence;
+        silence.assign((target - queued) / 2 & ~1u, 0);
+        SDL_QueueAudio(audio_dev, silence.data(), (uint32_t)silence.size() * 2);
+        if (queued) g_prof_underruns++;
+    }
     SDL_QueueAudio(audio_dev, stereo, frames * 4);
 }
 
@@ -487,14 +522,14 @@ int main(int argc, char** argv) {
         return 1;
     }
     // defaults: 4x internal resolution with sub-pixel vertices (gt.cfg / options override)
-    gpu_set_scale(4);
+    user_scale = 4;
     g_pgxp = true;
     load_settings();
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) g_log_level = LOG_DEBUG;
         else if (!strcmp(argv[i], "--widescreen")) set_widescreen(true);
         else if (!strcmp(argv[i], "--no-widescreen")) set_widescreen(false);
-        else if (!strcmp(argv[i], "--scale") && i + 1 < argc) gpu_set_scale(atoi(argv[++i]));
+        else if (!strcmp(argv[i], "--scale") && i + 1 < argc) user_scale = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--pgxp")) g_pgxp = true;
         else if (!strcmp(argv[i], "--no-pgxp")) g_pgxp = false;
         else if (!strcmp(argv[i], "--dither")) gpu_set_dither(true);
@@ -577,6 +612,7 @@ int main(int argc, char** argv) {
     hw_init();
     cpu_init();
     gpu_init();
+    gpu_set_scale(user_scale);
     spu_init();
     cd_init();
     sio_init();

@@ -110,7 +110,9 @@ listed in `gt.log`.
 ## HD rendering
 
 The GPU renders at 4x the native resolution by default. `--scale 1|2|4|8` or F10 changes it;
-`--scale 1 --no-pgxp` gives the original output exactly.
+`--scale 1 --no-pgxp` gives the original output exactly. 480-line modes (Simulation Mode's
+menus are 640x480) render at half the chosen scale, which gives the same output height as
+races at the full scale (1280x960 at 4x) for a quarter of the work.
 
 * **Upscaled VRAM.** VRAM is kept at the internal resolution, each native pixel an NxN
   block. CPU transfers, texture and CLUT fetches use the top-left sample of each block, so the
@@ -124,7 +126,8 @@ The GPU renders at 4x the native resolution by default. `--scale 1|2|4|8` or F10
   running, with hazard tracking so results are identical to single-threaded rendering.
 * **Dithering** uses the native 4x4 pattern scaled up; `--no-dither` or F7 turns it off.
 
-A race runs at full speed (16.7 ms per 60 Hz field) at 4x on a Ryzen 5 3600.
+A race runs at full speed (16.7 ms per 60 Hz field) at 4x on a Ryzen 5 3600. Audio keeps
+about 15–50 ms queued so that an occasional slow frame does not cause a gap.
 `GT_PROFILE=1` logs a per-frame
 breakdown every 300 frames, `GT_GPU_THREADS=N` sets the number of render threads.
 
