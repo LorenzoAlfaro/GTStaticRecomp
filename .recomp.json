@@ -1,0 +1,14 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Gran Turismo",
+  "wikidata": "Q944320",
+  "system": "PS1",
+  "type": "recomp",
+  "original": {"region": "USA", "revision": "1.1", "serial": "SCUS-94194"},
+  "project": "GTStaticRecomp",
+  "status": "in-progress",
+  "targets": ["Windows"],
+  "toolchain": "custom",
+  "approach": "The game's five packed MIPS R3000A executables are unpacked and translated to C at build time and linked with an HLE PS1 runtime (GTE, software GPU, SPU, CD-ROM, MDEC); BIOS Exec switches between them.",
+  "notes": "Intro FMV, Arcade Mode races and Simulation Mode's map, menus and license tests run at full speed with music. 4x internal resolution with sub-pixel vertices, 16:9 widescreen, save states. Not yet tested: car purchases, championships, replays, two-player, memory card saves."
+}
