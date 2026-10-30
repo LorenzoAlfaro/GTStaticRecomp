@@ -14,6 +14,10 @@ $ninja = Get-ChildItem $pkgs -Directory -Filter "Ninja-build.Ninja*" | Select-Ob
 if ($llvm) { $env:PATH = "$($llvm.FullName)\bin;$env:PATH" }
 if ($ninja) { $env:PATH = "$($ninja.FullName);$env:PATH" }
 $env:PATH = "C:\Program Files\CMake\bin;$env:PATH"
+# prefer a real Python over the Windows Store "python" alias
+foreach ($d in "$env:LOCALAPPDATA\Python\bin", "$env:LOCALAPPDATA\Programs\Python\Python314") {
+    if (Test-Path "$d\python.exe") { $env:PATH = "$d;$env:PATH"; break }
+}
 
 if ($Disc) {
     python tools/extract.py $Disc data

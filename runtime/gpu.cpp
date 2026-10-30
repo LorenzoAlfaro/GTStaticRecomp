@@ -6,7 +6,6 @@
 // 1024x512 VRAM. Polygons, rectangles and lines are rasterized at the full internal
 // resolution, with sub-pixel vertex positions from the GTE when PGXP is enabled.
 // At S=1 without PGXP the output is identical to a native-resolution renderer.
-#include <immintrin.h>
 
 #include <algorithm>
 #include <atomic>
@@ -23,6 +22,15 @@
 #include "state.h"
 
 namespace psx {
+
+// spin-wait hint for the render queue
+static inline void cpu_relax() {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+    __asm__ volatile("yield");
+#endif
+}
 
 static int sh = 0;                    // log2(scale)
 static int VW = 1024, VH = 512;       // internal VRAM size
@@ -475,7 +483,7 @@ static void worker_main(int id) {
         // brief spin, then sleep until new work is published
         bool got = false;
         for (int i = 0; i < 4000 && !got; i++) {
-            _mm_pause();
+            cpu_relax();
             got = q_head.load(std::memory_order_acquire) > done;
         }
         if (got) continue;
@@ -518,7 +526,7 @@ void gpu_sync() {
         g_gpu_stalls++;
         double t = wall();
         wake_workers();
-        while (min_done() < head) _mm_pause();
+        while (min_done() < head) cpu_relax();
         g_gpu_wait_s += wall() - t;
     }
     pend_write.clear();
@@ -534,7 +542,7 @@ static void submit(const Job& j) {
     if (head - min_done() >= kQueueSize) {
         double t = wall();
         wake_workers();
-        while (head - min_done() >= kQueueSize) _mm_pause();
+        while (head - min_done() >= kQueueSize) cpu_relax();
         g_gpu_full_s += wall() - t;
     }
     queue[head % kQueueSize] = j;

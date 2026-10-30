@@ -25,12 +25,15 @@ building both, for anyone writing a recompiler.
   (`GTEND.EXE`), replays, two-player battle and memory card saves (`memcard1.mcd`) have not
   been tested yet.
 * FMV playback (MDEC) is implemented.
-* 4x internal resolution with sub-pixel vertices (no wobble) by default, optional 16:9
-  widescreen, keyboard and controller support (see below).
+* 4x internal resolution with sub-pixel vertices (no wobble) by default, optional 16:9 or
+  full-window widescreen, save states, keyboard and controller support (see below).
 * Not implemented: the analog-pad protocol (analog sticks are mapped to the D-pad), more than
   one controller port.
-* Windows x64 only for now (`runtime/jmp.c` is Win64 assembly; everything else is portable
-  C/C++ with SDL2).
+* Windows x64, and Android through
+  [GTStaticRecompAndroid](https://github.com/LorenzoAlfaro/GTStaticRecompAndroid), which builds
+  this runtime for phones (tested on a Pixel 7a: full speed at 2x, filling the screen) and the
+  Android emulator. `runtime/jmp.c` has the per-architecture assembly (Win64, x86-64 System V,
+  AArch64, ARMv7); everything else is portable C/C++ with SDL2.
 
 ## Layout
 
@@ -92,7 +95,7 @@ with the disc it was built from.
 
 Keyboard: arrows = D-pad, C = Cross, V = Circle, X = Square, Z = Triangle, Enter = Start,
 Space = Select, LShift/RShift = L1/R1, LCtrl/RCtrl = L2/R2. F11 or Alt+Enter = fullscreen,
-Tab = fast forward, Pause = pause, F9 = 16:9 widescreen, F10 = internal resolution
+Tab = fast forward, Pause = pause, F9 = aspect (4:3, 16:9, fill), F10 = internal resolution
 (1x/2x/4x), F8 = PGXP sub-pixel vertices, F7 = dithering. F5 = save state, F6 = load state,
 F2/F3 = previous/next save state slot (1–9, shown in the window title). Settings are saved in
 `gt.cfg`.
@@ -102,7 +105,9 @@ use the standard layout (A = Cross, B = Circle, X = Square, Y = Triangle). Joyst
 mapping (e.g. vJoy) use a generic layout: button 0 = Cross, 1 = Circle, 2 = Square,
 3 = Triangle, 4/5 = L1/R1, 6/7 = L2/R2, 8 = Select, 9 = Start, stick/hat = D-pad.
 All connected controllers are read at once (their inputs are combined). Detected devices are
-listed in `gt.log`; controllers keep working when the window is not focused.
+listed in `gt.log`; controllers keep working when the window is not focused. On a controller,
+clicking the left stick cycles the aspect and clicking the right stick the internal resolution
+(useful on Android, where there is no keyboard).
 
 `--display N` (or `display=N` in `gt.cfg`) opens the window on monitor N; the monitors are
 listed in `gt.log`.
@@ -137,13 +142,19 @@ F5 saves the whole machine to `states/slotN.gtss` and F6 loads it, in the same s
 later one. In-game saves to the memory card (`memcard1.mcd`) are separate and not affected.
 
 A static recomp needs one thing an emulator doesn't: the game's code runs as nested native
-functions, so part of its state is the host call stack. The game therefore runs on a stack
-at a fixed address (`runtime/state.cpp`) and `gt.exe` is linked without ASLR. Saving and
-loading happen only at one point, the start of the vblank event, where that stack holds
-nothing but return addresses, scalars and pointers into `gt.exe`. A state holds the bytes of
-that stack and a jump buffer taken there, plus every device's data (`*_state` functions in
-each runtime file; one function both saves and loads). Loading restores the devices, copies
-the stack back from a scratch stack and jumps into the buffer.
+functions, so part of its state is the host call stack. The game therefore runs on a stack of
+its own (`runtime/state.cpp`). Saving and loading happen only at one point, the start of the
+vblank event, where that stack holds nothing but return addresses, scalars, addresses on the
+stack itself and pointers into the program's globals. A state holds the bytes of that stack
+and a jump buffer taken there, plus every device's data (`*_state` functions in each runtime
+file; one function both saves and loads). Loading restores the devices, copies the stack
+back from a scratch stack and jumps into the buffer.
+
+If the program or the stack sits at a different address than when the state was saved (on
+Android every launch loads the library somewhere else), the words that pointed into the old
+program image or the old stack are moved by the same distance (rebasing). On Windows `gt.exe`
+is linked without ASLR and the stack has a fixed address, so nothing moves there.
+`GT_STACK_ANYWHERE=1` puts the stack at a random address to test rebasing on Windows.
 
 * A state only loads into the exact `gt.exe` that made it (its hash is stored): rebuilding
   makes old states unusable.
@@ -151,14 +162,18 @@ the stack back from a scratch stack and jumps into the buffer.
   resolution (VRAM is converted).
 * Tested: a run that loads a state matches the original run pixel for pixel and with
   identical RAM, both in a new session and when rewinding in the same session, including
-  loading a menu state during a race (a different executable resident).
+  loading a menu state during a race (a different executable resident), and on Android after
+  restarting the app (the library at a different address).
 
 ## Widescreen
 
-`--widescreen` or F9 switches to 16:9. It is done in the GTE rather than in game code: the
-perspective transform (RTPS/RTPT) scales projected X by 3/4 around the screen center, so a
-16:9 field of view fits in the game's 4:3 picture, which is then shown stretched to 16:9
-(`runtime/gte.cpp`). 2D elements (HUD, menus, text) are not corrected and appear 33% wider.
+F9 (or a left-stick click) cycles the aspect: 4:3 (original), 16:9, and fill, which uses the
+window's or the phone screen's own shape (the default on Android; a 20:9 phone is filled edge
+to edge). `--widescreen` / `--aspect 4:3|16:9|fill|W:H` set it from the command line, `aspect=`
+in `gt.cfg` keeps it. It is done in the GTE rather than in game code: the perspective
+transform (RTPS/RTPT) scales projected X by (4/3) / aspect around the screen center (3/4 for
+16:9), so the wider field of view fits in the game's 4:3 picture, which is then shown
+stretched to that aspect (`runtime/gte.cpp`). 2D elements (HUD, menus, text) are not corrected and appear wider (33% at 16:9).
 The game still culls with its own 4:3 view, so objects near the left and right edges can
 appear late.
 

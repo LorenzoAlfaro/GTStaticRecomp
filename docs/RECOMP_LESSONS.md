@@ -386,10 +386,44 @@ tooling) carried over unchanged. No decomp or symbol map was used.
 - **Frontend:** `--display N` / `display=` picks the monitor; scripted runs (`--frames`) no
   longer take keyboard focus.
 
+### Android port (`GTStaticRecompAndroid`)
+Built the same way as CTR's (NDK + SDK tools, no Gradle). Tested first on an x86-64 Android
+emulator (`gt_test` AVD), then on a Pixel 7a: full speed at 2x in races and menus, audio never
+ran dry, and save states load after restarting the app.
+
+| # | Blocker | Time | Status |
+|---|---|---|---|
+| A1 | Save states across launches: the library loads at a random address | 2 | Solved (rebasing) |
+| A2 | Loaded state aborted with "stack corruption detected" | 1 | Solved (no stack protector) |
+| A3 | Screenshots silently missing on Android | 1 | Solved |
+| A4 | The emulator presents frames slowly (~20 ms) | 1 | Emulator only |
+
+- **What had to change** (most of it from CTR's port): `rt_setjmp/longjmp` and
+  `rt_run_on_stack` for AArch64, ARMv7 and x86-64 System V (the emulator); an ARM `yield`
+  spin hint; the Android startup block; aspect modes with "fill" as the Android default.
+- **A1:** Windows has a fixed `gt.exe` base and a fixed stack address, so a saved stack is
+  valid as-is. On Android `libmain.so` loads somewhere else each launch. Loading now moves
+  every saved word that pointed into the old program image or the old stack (the saved stack
+  bytes and all jump buffers) by the distance each one moved; the build id is a hash of the
+  library's executable segments in memory, which are the same at any address.
+  `GT_STACK_ANYWHERE=1` exercises this on Windows.
+- **A2:** the NDK compiles with `-fstack-protector-strong`. Each protected frame holds a random
+  per-process canary, so a frame restored from another process fails its check on return.
+  Build the runtime and game code with `-fno-stack-protector` (and
+  `-mbranch-protection=none` on arm64, since signed return addresses use per-process keys
+  too). **Lesson:** anything per-process in a frame (canaries, signed pointers) breaks
+  stack-restoring save states; check the toolchain's hardening defaults on each platform.
+- **A3:** SDL opens relative paths on Android as read-only APK assets, so `SDL_SaveBMP` with
+  `./shot.bmp` failed without a visible error. Use absolute paths.
+- **A4:** the emulator (SwiftShader GPU) spent ~20 ms per frame presenting at 2400x1080 while
+  the game itself took 2–8 ms; the Pixel 7a presents in ~1 ms. **Lesson:** use the emulator
+  for correctness (screenshots, save states), a real device for speed.
+
 ### Open issues
 - In Simulation Mode only the map, My Home, the License center and license test B-1 have been
   tried; buying cars, championships, `GTEND.EXE`, replays, two-player and memory cards are
   untested.
+- Android: no touch controls yet (a game controller is needed).
 - Only the digital pad is emulated (analog sticks are mapped to the D-pad).
 - 2D HUD in widescreen; edge culling in widescreen.
 

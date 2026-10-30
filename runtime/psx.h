@@ -92,7 +92,8 @@ void gpu_set_dither(bool on);
 bool gpu_dither();
 
 // ---- enhancements (hooks.cpp) -------------------------------------------------------
-void set_widescreen(bool on);
+void set_aspect(double aspect);  // 4/3 = original; wider renders a wider field of view
+double aspect();
 bool widescreen();
 
 // ---- SPU ---------------------------------------------------------------------------

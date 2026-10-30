@@ -1,10 +1,13 @@
 // SDL2 frontend: window/video, audio, input, pacing, and startup.
 #include <SDL.h>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <thread>
 #include <vector>
@@ -41,7 +44,23 @@ static uint64_t exit_after_frames = 0;
 // Internal resolution chosen by the user (F10, --scale, gt.cfg). 480-line (interlaced) modes,
 // such as Simulation Mode's menus, are rendered at half of it: the same output height as a
 // 240-line mode at the full scale, for a quarter of the rendering work.
+#ifdef __ANDROID__
+static constexpr int kMaxUserScale = 2;  // phones: 1x or 2x
+#else
+static constexpr int kMaxUserScale = 4;
+#endif
 static int user_scale = 4;
+// Picture shape: 0 = 4:3 (original), 1 = 16:9, 2 = fill (the window's or phone screen's own
+// aspect). Wider shapes render a wider field of view (runtime/gte.cpp); the HUD stretches.
+static int aspect_mode = 0;
+static double forced_aspect = 0;  // --aspect W:H (testing phone shapes on a PC)
+static const char* const aspect_names[3] = {"4:3", "16:9", "fill"};
+static double target_aspect(int ww, int wh) {
+    if (forced_aspect > 0) return forced_aspect;
+    if (aspect_mode == 1) return 16.0 / 9.0;
+    if (aspect_mode == 2 && ww > 0 && wh > 0) return std::max(4.0 / 3.0, (double)ww / wh);
+    return 4.0 / 3.0;
+}
 static int effective_scale(const DisplayInfo& d) {
     return d.h > 256 ? std::max(1, user_scale / 2) : user_scale;
 }
@@ -94,7 +113,10 @@ static int frame_w = 0, frame_h = 0;
 static void save_screenshot(const std::string& path) {
     SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(frame.data(), frame_w, frame_h, 32, frame_w * 4, SDL_PIXELFORMAT_ARGB8888);
     if (s) {
-        SDL_SaveBMP(s, path.c_str());
+        // absolute path: on Android, SDL opens relative paths as (read-only) APK assets
+        std::error_code ec;
+        std::string abs = std::filesystem::absolute(path, ec).string();
+        if (SDL_SaveBMP(s, (ec ? path : abs).c_str()) != 0) LOGW("screenshot %s: %s", path.c_str(), SDL_GetError());
         SDL_FreeSurface(s);
     }
 }
@@ -145,7 +167,8 @@ static void load_settings() {
     char line[256];
     while (fgets(line, sizeof line, f)) {
         int v;
-        if (sscanf(line, "widescreen=%d", &v) == 1) set_widescreen(v != 0);
+        if (sscanf(line, "widescreen=%d", &v) == 1) aspect_mode = v ? 1 : 0;  // older gt.cfg
+        if (sscanf(line, "aspect=%d", &v) == 1 && v >= 0 && v <= 2) aspect_mode = v;
         if (sscanf(line, "scale=%d", &v) == 1) user_scale = v;
         if (sscanf(line, "pgxp=%d", &v) == 1) g_pgxp = v != 0;
         if (sscanf(line, "dither=%d", &v) == 1) gpu_set_dither(v != 0);
@@ -157,7 +180,7 @@ static void load_settings() {
 static void save_settings() {
     FILE* f = fopen("gt.cfg", "w");
     if (!f) return;
-    fprintf(f, "widescreen=%d\n", widescreen() ? 1 : 0);
+    fprintf(f, "aspect=%d\n", aspect_mode);
     fprintf(f, "scale=%d\n", user_scale);
     fprintf(f, "pgxp=%d\n", g_pgxp ? 1 : 0);
     fprintf(f, "dither=%d\n", gpu_dither() ? 1 : 0);
@@ -189,8 +212,6 @@ static void update_pad() {
     for (SDL_GameController* gamepad : gamepads) {
         auto btn = [&](SDL_GameControllerButton sb, int bit) { if (SDL_GameControllerGetButton(gamepad, sb)) press(bit); };
         btn(SDL_CONTROLLER_BUTTON_BACK, 0);
-        btn(SDL_CONTROLLER_BUTTON_LEFTSTICK, 1);
-        btn(SDL_CONTROLLER_BUTTON_RIGHTSTICK, 2);
         btn(SDL_CONTROLLER_BUTTON_START, 3);
         btn(SDL_CONTROLLER_BUTTON_DPAD_UP, 4);
         btn(SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 5);
@@ -287,6 +308,17 @@ void frontend_poll_input() {
         case SDL_QUIT: g_quit = true; break;
         case SDL_JOYDEVICEADDED: open_device(e.jdevice.which); break;
         case SDL_JOYDEVICEREMOVED: close_device(e.jdevice.which); break;
+        case SDL_CONTROLLERBUTTONDOWN:
+            // controller-only play (phones, TVs): left stick click cycles the aspect,
+            // right stick click the internal resolution
+            if (e.cbutton.button == SDL_CONTROLLER_BUTTON_LEFTSTICK) {
+                aspect_mode = (aspect_mode + 1) % 3;
+                save_settings();
+            } else if (e.cbutton.button == SDL_CONTROLLER_BUTTON_RIGHTSTICK) {
+                user_scale = user_scale >= kMaxUserScale ? 1 : user_scale * 2;
+                save_settings();
+            }
+            break;
         case SDL_KEYDOWN:
             LOGD("key down: scancode %d (%s)", e.key.keysym.scancode, SDL_GetScancodeName(e.key.keysym.scancode));
             if (e.key.keysym.scancode == SDL_SCANCODE_F11 ||
@@ -295,7 +327,7 @@ void frontend_poll_input() {
                 SDL_SetWindowFullscreen(window, fs ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
             }
             if (e.key.keysym.scancode == SDL_SCANCODE_F10) {  // internal resolution 1x -> 2x -> 4x
-                user_scale = user_scale >= 4 ? 1 : user_scale * 2;
+                user_scale = user_scale >= kMaxUserScale ? 1 : user_scale * 2;
                 save_settings();
             }
             if (e.key.keysym.scancode == SDL_SCANCODE_F8) {
@@ -307,7 +339,7 @@ void frontend_poll_input() {
                 save_settings();
             }
             if (e.key.keysym.scancode == SDL_SCANCODE_F9) {
-                set_widescreen(!widescreen());
+                aspect_mode = (aspect_mode + 1) % 3;
                 save_settings();
             }
             if (e.key.keysym.scancode == SDL_SCANCODE_F5) state_request_save(state_slot);
@@ -328,7 +360,7 @@ void frontend_poll_input() {
 
 extern uint64_t g_gpu_stalls, g_gpu_stall_why[4], g_gpu_copies;
 extern double g_gpu_wait_s, g_gpu_full_s;
-static bool profile = getenv("GT_PROFILE") != nullptr;
+static bool profile = getenv("GT_PROFILE") != nullptr;  // or --profile
 static double g_prof_max_frame = 0;          // longest frame (profiling)
 static uint32_t g_prof_min_queue = 1u << 30; // lowest queued audio, bytes (profiling)
 static int g_prof_underruns = 0;              // audio cushion refills (profiling)
@@ -370,11 +402,12 @@ void frontend_vblank() {
     double t2 = now_seconds();
     int ww, wh;
     SDL_GetRendererOutputSize(renderer, &ww, &wh);
-    // the picture fills a 4:3 screen; widescreen renders a 16:9 field of view into the same
-    // buffer (runtime/gte.cpp), shown stretched to 16:9
-    int ax = widescreen() ? 16 : 4, ay = widescreen() ? 9 : 3;
-    int dw = ww, dh = ww * ay / ax;
-    if (dh > wh) { dh = wh; dw = wh * ax / ay; }
+    // the game's picture is drawn for a 4:3 screen; a wider aspect renders a wider field of
+    // view into the same picture (runtime/gte.cpp), shown stretched to that aspect
+    double a = target_aspect(ww, wh);
+    if (a != aspect()) set_aspect(a);
+    int dw = ww, dh = (int)(ww / a + 0.5);
+    if (dh > wh) { dh = wh; dw = (int)(wh * a + 0.5); }
     SDL_Rect dst = {(ww - dw) / 2, (wh - dh) / 2, dw, dh};
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
@@ -449,11 +482,17 @@ void frontend_vblank() {
     char title[256];
     const char* msg = state_message();
     snprintf(title, sizeof title, "Gran Turismo (static recomp) - %.1f fps%s - %dx%s - slot %d%s%s", fps,
-             widescreen() ? " - 16:9" : "", gpu_scale(), g_pgxp ? " PGXP" : "", state_slot, *msg ? " - " : "", msg);
+             aspect_mode ? (aspect_mode == 1 ? " - 16:9" : " - fill") : "", gpu_scale(), g_pgxp ? " PGXP" : "", state_slot, *msg ? " - " : "", msg);
     if (last_title != title) {
         SDL_SetWindowTitle(window, title);
         last_title = title;
     }
+#ifdef __ANDROID__
+    // no window title on a phone: log the status every 10 s, and messages as they come
+    static std::string last_msg;
+    if ((frame_counter % 600 == 0) || (*msg && last_msg != msg)) LOGI("%s", title + strlen("Gran Turismo (static recomp) - "));
+    last_msg = msg;
+#endif
 }
 
 // a save state was just loaded: drop audio from before it and restart frame pacing
@@ -504,6 +543,14 @@ static std::string find_disc(int argc, char** argv) {
         }
         fclose(f);
     }
+    // otherwise the first .cue (or .bin) in the working directory
+    std::error_code ec;
+    for (const char* ext : {".cue", ".bin"})
+        for (const auto& e : std::filesystem::directory_iterator(".", ec)) {
+            std::string ex = e.path().extension().string();
+            for (char& ch : ex) ch = (char)tolower((unsigned char)ch);
+            if (e.is_regular_file(ec) && ex == ext) return e.path().filename().string();
+        }
     return "";
 }
 
@@ -516,19 +563,45 @@ int main(int argc, char** argv) {
     // GUI build: no console, so keep the log in a file next to the game
     if (_fileno(stderr) < 0) freopen("gt.log", "w", stderr);
 #endif
+#ifdef __ANDROID__
+    // everything lives in the app's external files directory
+    // (/sdcard/Android/data/<package>/files): disc image, gt.cfg, memory cards, states, gt.log
+    if (const char* dir = SDL_AndroidGetExternalStoragePath()) {
+        std::error_code ec;
+        std::filesystem::current_path(dir, ec);
+    }
+    freopen("gt.log", "w", stderr);
+    setvbuf(stderr, nullptr, _IOLBF, 0);
+#endif
     std::string disc = find_disc(argc, argv);
     if (disc.empty()) {
         fprintf(stderr, "usage: %s <Gran Turismo (USA).cue|.bin>\n  (or put the path in gt_disc.txt)\n", argv[0]);
+#ifdef __ANDROID__
+        std::string msg = "Copy the Gran Turismo (USA) .cue and .bin into\n" + std::filesystem::current_path().string();
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Disc image not found", msg.c_str(), nullptr);
+#endif
         return 1;
     }
-    // defaults: 4x internal resolution with sub-pixel vertices (gt.cfg / options override)
+    // defaults: 4x internal resolution with sub-pixel vertices; on phones 2x, filling the
+    // screen (gt.cfg and options override)
+#ifdef __ANDROID__
+    user_scale = 2;
+    aspect_mode = 2;
+#else
     user_scale = 4;
+#endif
     g_pgxp = true;
     load_settings();
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-v")) g_log_level = LOG_DEBUG;
-        else if (!strcmp(argv[i], "--widescreen")) set_widescreen(true);
-        else if (!strcmp(argv[i], "--no-widescreen")) set_widescreen(false);
+        else if (!strcmp(argv[i], "--widescreen")) aspect_mode = 1;
+        else if (!strcmp(argv[i], "--no-widescreen")) aspect_mode = 0;
+        else if (!strcmp(argv[i], "--aspect") && i + 1 < argc) {
+            std::string a = argv[++i];
+            int w = 0, h = 0;
+            for (int k = 0; k < 3; k++) if (a == aspect_names[k]) aspect_mode = k;
+            if (sscanf(a.c_str(), "%d:%d", &w, &h) == 2 && w > 0 && h > 0) forced_aspect = (double)w / h;
+        }
         else if (!strcmp(argv[i], "--scale") && i + 1 < argc) user_scale = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--pgxp")) g_pgxp = true;
         else if (!strcmp(argv[i], "--no-pgxp")) g_pgxp = false;
@@ -542,6 +615,7 @@ int main(int argc, char** argv) {
             shot_every = strtoull(argv[++i], nullptr, 10);
             shot_dir = argv[++i];
         } else if (!strcmp(argv[i], "--turbo")) fast_forward = true;
+        else if (!strcmp(argv[i], "--profile")) profile = true;
         else if (!strcmp(argv[i], "--display") && i + 1 < argc) display_index = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--save-state-at") && i + 2 < argc) {
             save_at_frame = strtoull(argv[++i], nullptr, 10);
@@ -576,6 +650,8 @@ int main(int argc, char** argv) {
 
     // controllers keep working when the window is not focused
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    // phones: don't expose the accelerometer as a joystick (tilting would press the D-pad)
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
@@ -587,8 +663,14 @@ int main(int argc, char** argv) {
         LOGI("display %d: %dx%d at %d,%d%s", d, r.w, r.h, r.x, r.y, d == display_index ? " (used)" : "");
     }
     int disp = display_index >= 0 && display_index < ndisp ? display_index : 0;
+#ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+    window = SDL_CreateWindow("Gran Turismo (static recomp)", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 960,
+                              SDL_WINDOW_FULLSCREEN | SDL_WINDOW_ALLOW_HIGHDPI);
+#else
     window = SDL_CreateWindow("Gran Turismo (static recomp)", SDL_WINDOWPOS_CENTERED_DISPLAY(disp),
                               SDL_WINDOWPOS_CENTERED_DISPLAY(disp), 1280, 960, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#endif
     if (!exit_after_frames) {  // scripted test runs leave the keyboard focus alone
         SDL_RaiseWindow(window);
         SDL_SetWindowInputFocus(window);
@@ -618,9 +700,13 @@ int main(int argc, char** argv) {
     sio_init();
     mdec_init();
     bios_init();
+#ifdef _WIN32
     char exe_path[MAX_PATH];
     GetModuleFileNameA(nullptr, exe_path, sizeof exe_path);
     state_init(exe_path);
+#else
+    state_init(nullptr);
+#endif
     if (load_at_start) state_request_load(load_at_start);  // handled at the first vblank
     // the game runs on a fixed-address stack so save states can capture it (state.cpp)
     state_run([] { bios_boot(&g_cpu); });

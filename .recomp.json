@@ -7,8 +7,8 @@
   "original": {"region": "USA", "revision": "1.1", "serial": "SCUS-94194"},
   "project": "GTStaticRecomp",
   "status": "in-progress",
-  "targets": ["Windows"],
+  "targets": ["Windows", "Android"],
   "toolchain": "custom",
   "approach": "The game's five packed MIPS R3000A executables are unpacked and translated to C at build time and linked with an HLE PS1 runtime (GTE, software GPU, SPU, CD-ROM, MDEC); BIOS Exec switches between them.",
-  "notes": "Intro FMV, Arcade Mode races and Simulation Mode's map, menus and license tests run at full speed with music. 4x internal resolution with sub-pixel vertices, 16:9 widescreen, save states. Not yet tested: car purchases, championships, replays, two-player, memory card saves."
+  "notes": "Intro FMV, Arcade Mode races and Simulation Mode's map, menus and license tests run at full speed with music. 4x internal resolution with sub-pixel vertices, 16:9 or full-screen widescreen, save states; Android phones at full speed. Not yet tested: car purchases, championships, replays, two-player, memory card saves."
 }

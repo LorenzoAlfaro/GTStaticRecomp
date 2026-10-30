@@ -129,7 +129,11 @@ void interpolate_color(int64_t m1, int64_t m2, int64_t m3, int shift, bool lm) {
     for (int i = 0; i < 3; i++) set_mac_ir(i + 1, (int64_t)ir[i] * g.IR[0] + in[i], shift, lm);
 }
 
-bool g_widescreen = false;
+// Widescreen: projected X is scaled by (4/3) / aspect around the screen center (x/4096), so a
+// wider field of view fits in the game's 4:3 picture, which the frontend shows stretched to
+// that aspect. 4096 = 4:3 (off); 16:9 is exactly 3/4.
+int32_t g_xscale = 4096;
+double g_aspect = 4.0 / 3.0;
 
 void rtp(int n, int shift, bool lm, bool last) {
     const int16_t* v = g.V[n];
@@ -153,10 +157,9 @@ void rtp(int n, int shift, bool lm, bool last) {
     }
     push_sz(mac[2] >> 12);
     uint32_t hs = divide(g.H, g.SZ[3]);
-    // widescreen: projected X shrinks by 3/4 around the screen center, so a 16:9 field
-    // of view fits in the game's 4:3 buffer, which the frontend shows stretched to 16:9
+    // widescreen: projected X shrinks around the screen center (see g_xscale)
     int64_t sx = (int64_t)hs * g.IR[1];
-    if (g_widescreen) sx = sx * 3 / 4;
+    if (g_xscale != 4096) sx = sx * g_xscale / 4096;
     sx += g.OFX;
     int64_t sy = (int64_t)hs * g.IR[2] + g.OFY;
     check_mac0(sx);
@@ -168,7 +171,7 @@ void rtp(int n, int shift, bool lm, bool last) {
         g.IR[1] == (int32_t)(mac[0] >> shift) && g.IR[2] == (int32_t)(mac[1] >> shift)) {
         double z = (double)mac[2];  // view Z << 12
         double scale = (double)g.H * 4096.0 / z;
-        double px = (double)mac[0] / (double)(1 << shift) * scale * (g_widescreen ? 0.75 : 1.0) + g.OFX / 65536.0;
+        double px = (double)mac[0] / (double)(1 << shift) * scale * (g_xscale / 4096.0) + g.OFX / 65536.0;
         double py = (double)mac[1] / (double)(1 << shift) * scale + g.OFY / 65536.0;
         int32_t ix = g.SXY[2][0], iy = g.SXY[2][1];
         if (px > ix - 2 && px < ix + 2 && py > iy - 2 && py < iy + 2)
@@ -470,8 +473,13 @@ void gte_command(CPU*, uint32_t cmd) {
 }  // extern "C"
 
 namespace psx {
-void set_widescreen(bool on) { g_widescreen = on; }
-bool widescreen() { return g_widescreen; }
+void set_aspect(double a) {
+    if (a < 4.0 / 3.0) a = 4.0 / 3.0;
+    g_aspect = a;
+    g_xscale = (int32_t)(4096.0 * (4.0 / 3.0) / a + 0.5);
+}
+double aspect() { return g_aspect; }
+bool widescreen() { return g_xscale != 4096; }
 void gte_state(StateIO& s) {
     s.section(0x47544501);
     s.io(g);

@@ -751,4 +751,11 @@ void cpu_state(StateIO& s) {
     s.io(g_exec_jb);
     s.io(g_exec_jb_set);
 }
+
+// every jump buffer that can hold host addresses, for rebasing a loaded state
+void cpu_jmpbufs(void (*fn)(void* p, size_t bytes)) {
+    for (int k = 0; k < g_retsp; k++) fn(g_retframes[k].jb, sizeof(rt_jmp_buf));
+    fn(g_exc_jb, sizeof g_exc_jb);
+    fn(g_exec_jb, sizeof g_exec_jb);
+}
 }  // namespace psx
